@@ -1,8 +1,13 @@
 
 void networking_init(int argc,char*argv[])
 {
-  MPI_Init(&argc, &argv);
+  int mpi_thread_level_required = MPI_THREAD_MULTIPLE;
+  int mpi_thread_level_available;
+  MPI_Init_thread(&argc, &argv, mpi_thread_level_required, &mpi_thread_level_available);
+  assert(mpi_thread_level_available >= mpi_thread_level_required);
+
 #ifdef KRS_ENABLE_SHMEMSPACE
+  mpi_thread_level_required = SHMEM_THREAD_MULTIPLE;
   shmem_init_thread(mpi_thread_level_required, &mpi_thread_level_available);
   assert(mpi_thread_level_available >= mpi_thread_level_required);
 #endif

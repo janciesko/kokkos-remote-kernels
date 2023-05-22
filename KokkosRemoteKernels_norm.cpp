@@ -5,8 +5,25 @@
 #include <mpi.h>
 #include <helper.hpp>
 
+//#define MY_LOCAL_DEBUG
+
 using RemoteSpace_t  = Kokkos::Experimental::DefaultRemoteMemorySpace;
 #define SIZE 1024
+
+template <class DstTraits, class SrcTraits>
+void print_view_type_accessiblity(DstTraits dV, SrcTraits sV)
+{
+    using dst_traits = typename DstTraits::traits;
+    using src_traits = typename SrcTraits::traits;
+
+    using assign_map = typename Kokkos::Impl::ViewMapping<
+          dst_traits, src_traits, Kokkos::Experimental::RemoteSpaceSpecializeTag>;
+
+    printf("%i %i\n", 
+      (int)assign_map::is_assignable,
+      (int)assign_map::is_assignable_data_type
+      );
+}
 
 int main(int argc, char *argv[]) {
 
@@ -14,70 +31,50 @@ int main(int argc, char *argv[]) {
 
   Kokkos::initialize(argc, argv);
   {
-    int myRank;
-    int numRanks;
-    MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
-    MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
     
-    printf("Hello from rank %d!\n", myRank);
-    int nx_total     = SIZE;
-    auto local_range = Kokkos::Experimental::get_range(nx_total, myRank);
+    using traitUnmanaged_t = Kokkos::MemoryTraits<Kokkos::Unmanaged>;
     
-    typedef Kokkos::View<const double*, RemoteSpace_t/*, Kokkos::Device<Kokkos::Cuda, Kokkos::Experimental::NVSHMEMSpace>*/> remote_view_t;
-    
-/*ORIG*/
+    /* Regular host View type */
+    using regular_host_view_t = Kokkos::View<double *, Kokkos::HostSpace>;
 
-  typedef Kokkos::View<
-      typename remote_view_t::const_value_type*,
+    /* Regular View type */
+    using regular_view_t = Kokkos::View<double *>;
+
+    /* Remote View type */
+    using remote_view_t = Kokkos::View<double*, RemoteSpace_t>;
+
+    /* Compatible Remote View type */
+    using remote_view_compat_t = Kokkos::View<double*, typename KokkosKernels::Impl::GetUnifiedLayout<remote_view_t>::array_layout, typename remote_view_t::device_type>;
+
+    /* Kokkos Kernels View type derived from a remote_view_t
+       This is what actually happens in Kokkos Kernels */
+    using XVector_Internal_Derived_t = Kokkos::View<
+      typename remote_view_t::non_const_value_type *,  
       typename KokkosKernels::Impl::GetUnifiedLayout<remote_view_t>::array_layout,
-      typename remote_view_t::device_type, Kokkos::MemoryTraits<Kokkos::Unmanaged> >
-      XVector_Internal;
-/*  Some mock-ups
-    typedef Kokkos::View<
-      typename remote_view_t::const_value_type*,
-            
-     //Kokkos::Device<Kokkos::Cuda, Kokkos::Experimental::NVSHMEMSpace>
-      remote_view_t::array_layout,
-      /*remote_view_t::memory_space*/
-      
-      /*remote_view_t::device_type*//* Kokkos::Device<Kokkos::Cuda, Kokkos::Experimental::NVSHMEMSpace>/*,
-      Kokkos::MemoryTraits<Kokkos::Unmanaged>*/
-      //typename Kokkos::Device<Kokkos::Cuda, Kokkos::Experimental::NVSHMEMSpace>
-      //RemoteSpace_t
-      /*typename XVector::device_type, Kokkos::MemoryTraits<Kokkos::Unmanaged>*/// >
-   //   XVector_Internal;
+      typename remote_view_t::device_type, traitUnmanaged_t>;
+  
+    
+    /* Create View */
+    remote_view_compat_t remote_view ("remote_view", SIZE);
 
-    using dst_traits = typename remote_view_t::traits;
-    using src_traits = typename XVector_Internal::traits;
-    using assign_map = typename Kokkos::Impl::ViewMapping<
-          dst_traits, src_traits,
-          Kokkos::Experimental::RemoteSpaceSpecializeTag>;
-    printf("%i %i %i %i %i %i\n", 
-      (int)assign_map::is_assignable,
-      (int)assign_map::is_assignable_value_type,
-      (int)assign_map::is_assignable_data_type,
-      (int)assign_map::is_assignable_dimension,
-      (int)assign_map::is_assignable_layout,
-      (int)assign_map::is_assignable_space
-      );
+    /* Test Assignements */
+    XVector_Internal_Derived_t xvector_derived_1 (remote_view);
+    XVector_Internal_Derived_t xvector_derived_2  = remote_view;
 
-    remote_view_t myVector("vector", nx_total);
-    remote_view_t myVector2 = myVector;
-    XVector_Internal internalVector = myVector;
-    //XVector_Internal myVector3(myVector);
+    #ifdef MY_LOCAL_DEBUG
+    print_view_type_accessiblity(xvector_orig, remote_view);
+    #endif
 
-#if 0
-    Kokkos::View<double*, RemoteSpace_t> myVector_2("vector", nx_total);
-    Kokkos::parallel_for(Kokkos::RangePolicy(local_range.second, local_range.first),
-			 KOKKOS_LAMBDA(const int idx) {     
-         myVector(idx) = (double)(myRank + 1);
-    });
-#endif
-
-    //printf("rank %d: myVector.extent(0)=%d, nx_total=%d\n", myRank, int(myVector.extent(0)), int(nx_total));
-  //  const double local_norm = KokkosBlas::nrm2_squared(myVector);
+    /* Call into Kokkos Kernels */
+    const double local_norm = KokkosBlas::nrm2_squared(remote_view);  
   }
-    Kokkos::finalize();
-    networking_fin();
 
+  Kokkos::finalize();
+  networking_fin();
 }
+
+#undef SIZE
+
+#ifdef MY_LOCAL_DEBUG
+#undef MY_LOCAL_DEBUG
+#endif
